@@ -1,0 +1,11 @@
+__pycache__/
+*.py[cod]
+.venv/
+example.png
+example_thumb.png
+example_values.png
+example_values_thumb.png
+example_narrow.png
+example_narrow_thumb.png
+.DS_Store
+
