@@ -73,8 +73,10 @@ python3 -m venv .venv
 - `SKILL.md`：完整构图方法、光影判断、翻车记录和修改原则。
 - `watercolor_lib.py`：纸张、颜料、湿画、干笔、留白、噪声和纹理引擎。
 - `example.py`：一张完整城市街景从大块到细节的可运行范例。
+- `example_state_pass3_3.pkl`：seed 3 第三遍开头的随机状态，使主街范例能逐像素复现定稿。
 - `scenes/`：运河、渔港和雨夜三个进阶构图范例及对应成图。
 - `wrong_0928_rainnight_cutout.png`：旧雨夜剪纸感的反例；对应代码保留在 `scenes/rainnight_old_cutout.py`。
+- `wrong_0928_venice_water.png`：旧威尼斯水面的反例，展示满河重复噪声与横向错位留下的代码痕迹。
 - `pigment_profile.npy`：一维径向功率谱，用随机相位合成颜料颗粒；不包含参考画面。
 - `wrong_0928_narrow_mask.png`：旧窄街投影的反例，供对照判断。
 

@@ -27,6 +27,13 @@ yy, xx = np.mgrid[:H, :W]
 yf, xf = yy.astype(np.float32), xx.astype(np.float32)
 S = wc.smoothstep
 
+
+def isolated(fn):
+    """新加的细节自己用一段随机数，画完把两条随机数流还回去。"""
+    st, rs = random.getstate(), wc.rng.bit_generator.state
+    fn()
+    random.setstate(st); wc.rng.bit_generator.state = rs
+
 VP = (330, 640)
 GLARE = (360, 600)            # 太阳在街尽头偏右、压得很低
 SUNFOOT = (1250, 640)          # 太阳在右边楼后面、画外；影子横过马路朝左下
@@ -167,6 +174,7 @@ rim = wc.blur(np.asarray(im, np.float32) / 255.0, 1.0) * np.clip(1.2 - np.hypot(
 P.lift((rim * S(0.3, 0.6, P.grain)).astype(np.float32), 0.85)
 # ---- 右边暗楼里的楼：檐口吃天光（浅线）、窗一排排（更深，偶尔一格反天光）、楼与楼之间一道缝 ----
 random.seed(SEED + 1)
+PRES_R = wc.noise(150, 110, octaves=2)          # 窗不到处盖印章：只有这张低频图高的一两处有窗（哥：整组消失）
 dens_now = 1 - np.exp(-P.D.mean(axis=2))
 for xa, xb, T, _ in R_segs:
     f0 = (xa - VP[0]) / (W - VP[0])
@@ -203,8 +211,18 @@ for xa, xb, T, _ in R_segs:
             wy += random.uniform(-4, 4) * f
             r = random.random()
             q = [(x, wy), (x + ww, wy + ww * 0.15), (x + ww, wy + wh), (x, wy + wh)]
-            if r < 0.45:
+            pres = PRES_R[int(min(H - 1, max(0, wy))), int(min(W - 1, max(0, x)))]
+            if r < 0.5 and pres < 0.4:
+                pass
+            elif r < 0.45:
                 wc.wash(P, q, (22, 26, 32), strength=random.uniform(0.3, 0.55), var=0.03, layers=3, edge=0.45)
+                def _hole(x=x, wy=wy, ww=ww, wh=wh, f=f):
+                    # 背光面的窗也是洞：洞口上沿深一截，窗台被街上反上来的光擦亮一点
+                    top_ = [(x, wy), (x + ww, wy + ww * 0.15), (x + ww, wy + wh * 0.35), (x, wy + wh * 0.35)]
+                    wc.wash(P, top_, (14, 16, 22), strength=0.35, var=0.02, layers=3, edge=0.4)
+                    sill = wc.stroke_mask([(x - ww * 0.15, wy + wh + 1.5), (x + ww * 1.15, wy + wh + 1.5 + ww * 0.15)], 1.2 * f + 0.8, 1.2 * f + 0.8, taper=False, rough=0.2)
+                    P.lift((sill * S(0.3, 0.55, P.grain) * 0.35).astype(np.float32), 1.0)
+                isolated(_hole)
             elif r < 0.5:
                 P.lift(wc.poly_mask(q) * 0.4, 1.0)                        # 一格窗反着天光
             x += ww * random.uniform(2.0, 3.2)
@@ -218,6 +236,7 @@ wallv = wc.noise(90, 3.5, octaves=3, persistence=0.55)
 P.add((covL * S(0.56, 0.63, 0.65 * wallv + 0.35 * P.grain) * (1 - dist) * np.clip((yf - 300) / 300, 0, 1)).astype(np.float32),
       EARTH, 0.35)
 random.seed(SEED + 2)
+PRES_L = wc.noise(140, 100, octaves=2)
 for xa, xb, T, _ in L_segs:
     f0 = (VP[0] - xb) / VP[0]
     for k, off in enumerate((20, 160)):
@@ -236,10 +255,26 @@ for xa, xb, T, _ in L_segs:
             wy = ly(x, yn, "L")
             ww, wh = (9 * f + 2) * random.uniform(0.8, 1.2), (30 * f + 4) * random.uniform(0.7, 1.1)
             wy += random.uniform(-3, 3) * f
-            if random.random() < 0.42:
+            if random.random() < 0.42 and PRES_L[int(min(H - 1, max(0, wy))), int(max(0, min(W - 1, x)))] > 0.45:
                 q = [(x, wy), (x + ww, wy - ww * 0.2), (x + ww, wy + wh), (x, wy + wh)]
-                wc.wash(P, q, (86, 70, 66), strength=random.uniform(0.4, 0.75) * (1 - 0.7 * float(dist[int(min(H - 1, wy)), int(max(0, min(W - 1, x)))])),
+                dfar = float(dist[int(min(H - 1, wy)), int(max(0, min(W - 1, x)))])
+                wc.wash(P, q, (86, 70, 66), strength=random.uniform(0.4, 0.75) * (1 - 0.7 * dfar),
                         var=0.02, layers=3, edge=0.5)
+                if f > 0.3:
+                    def _hole(x=x, wy=wy, ww=ww, wh=wh, f=f, dfar=dfar):
+                        # 窗是个洞：过梁的影（上沿）和里侧更深；窗台亮一横但被纸纹咬碎；窗台下一线影、往下淌一道
+                        top_ = [(x, wy), (x + ww, wy - ww * 0.2), (x + ww, wy + wh * 0.3 - ww * 0.2), (x, wy + wh * 0.3)]
+                        wc.wash(P, top_, (54, 40, 38), strength=0.45 * (1 - 0.7 * dfar), var=0.02, layers=3, edge=0.4)
+                        side = [(x, wy), (x + ww * 0.3, wy - ww * 0.06), (x + ww * 0.3, wy + wh), (x, wy + wh)]
+                        wc.wash(P, side, (54, 40, 38), strength=0.3 * (1 - 0.7 * dfar), var=0.02, layers=3, edge=0.4)
+                        sill = wc.stroke_mask([(x - ww * 0.2, wy + wh + 1.2), (x + ww * 1.2, wy + wh + 1.2 - ww * 0.22)], 1.2 * f + 0.8, 1.2 * f + 0.8, taper=False, rough=0.2)
+                        P.lift((sill * S(0.3, 0.55, P.grain) * 0.4).astype(np.float32), 1.0)
+                        P.add(np.roll(sill, int(1.2 * f + 1.5), axis=0).astype(np.float32), (120, 92, 78), 0.3)
+                        L_ = random.uniform(6, 30) * f + 3
+                        u = random.uniform(0.2, 0.8)
+                        drip = wc.stroke_mask([(x + ww * u, wy + wh + 3), (x + ww * u, wy + wh + 3 + L_)], ww * 0.3, ww * 0.06, taper=False, rough=0.3)
+                        P.add((drip * S(0.3, 0.6, P.vstreak)).astype(np.float32), (140, 112, 96), 0.3)
+                    isolated(_hole)
             x += ww * 2.3
 # 左边一楼：店面一条深，顶边硬（招牌/檐口那条线），底边被人和车咬碎；越往远越浅越简
 shop = [(-40, ly(-40, 704, "L")), (326, ly(326, 704, "L")), (326, ly(326, 812, "L")), (-40, ly(-40, 812, "L"))]
@@ -272,6 +307,151 @@ for i in range(6):
     P.lift(wc.stroke_mask([(x0, 697 + i * 3.1), (x0 + 3, 722 + i * 2.2)], 3.5, 3, taper=False) * 0.45, 1.0)
 lowAw = np.exp(-(((xf - 156) / 56.0) ** 2 + ((yf - 742) / 12.0) ** 2))     # 只剩遮阳棚自己底下一窄条
 wc.wet(P, lowAw.astype(np.float32), DEEP_WARM, strength=0.4, spread=3)
+
+
+def _volume():
+    """楼的体积（威尼斯那张学的）：转折有厚度，不只是一块颜色接着另一块颜色。"""
+    # 左边迎光：檐口顶边一线亮，紧贴着一条檐影，往下淌几道
+    for xa, xb, T, _ in L_segs[:4]:
+        f0 = (VP[0] - xb) / VP[0]
+        if f0 < 0.12:
+            continue
+        ya, yb_ = ly(xa, T, "L"), ly(xb, T, "L")
+        e = 9 * f0 + 3
+        lip = wc.stroke_mask([(xa + 1, ya + 1), (xb - 1, yb_ + 1)], 2.0 * f0 + 1, 2.0 * f0 + 1, taper=False, rough=0.2)
+        P.lift((lip * 0.45 * (1 - wet * 0.6)).astype(np.float32), 1.0)
+        band = [(xa, ya + 2.5), (xb, yb_ + 2.5), (xb, yb_ + 2.5 + e), (xa, ya + 2.5 + e)]
+        wc.wash(P, band, (112, 86, 72), strength=0.55, var=[0.01, 0.01, 0.05, 0.05], layers=5, edge=0.45,
+                fade=(1 - wet * 0.6).astype(np.float32))
+        for k in range(int(3 + 6 * f0)):
+            dx_ = xa + (xb - xa) * random.uniform(0.05, 0.95)
+            y0_ = ly(dx_, T, "L") + 2 + e
+            L_ = random.uniform(16, 80) * f0 + 5
+            m = wc.stroke_mask([(dx_, y0_ - 2), (dx_ + random.uniform(-1, 1), y0_ + L_)], e * 0.5, e * 0.1, taper=False, rough=0.3)
+            P.add((m * S(0.3, 0.6, P.vstreak) * (1 - wet * 0.6)).astype(np.float32), (126, 100, 84), 0.4)
+    # 左边：远一点那栋往街上凸出来一截，楼角露出正对我们的一面墙（太阳在前方偏右，这面墙在影里）
+    #   上沿水平、高度卡在它自己檐口跑到楼角那一点；楼角以外、上沿以上擦回天；影落在近的那栋立面上 = 那面墙的颜色压暗
+    for bnd, far_i in ((150, 2),):
+        xa, xb, T, _ = L_segs[far_i]
+        f = (VP[0] - bnd) / VP[0]
+        w = 20 * f + 5
+        xc = bnd + w
+        yc = ly(xc, T, "L")
+        for cx_ in range(int(bnd) - 1, int(xc) + 1):
+            yt = int(ly(cx_, T, "L")) - 6
+            d_top = P.D[max(0, yt - 26):max(1, yt - 16), cx_].mean(axis=0)
+            if int(yc) + 1 > yt:
+                P.D[yt:int(yc) + 1, cx_] = d_top[None, :]
+        bot = ly(bnd, 800, "L") - 10
+        endw = [(bnd - 1.5, yc), (xc, yc), (xc, bot), (bnd - 1.5, bot)]
+        wc.wash(P, endw, (120, 100, 88), strength=0.8, var=[0.006, 0.006, 0.02, 0.02], layers=8, edge=0.4)
+        wc.wash(P, [(bnd - 1.5, yc + 1), (xc + 1, yc + 1), (xc + 1, yc + 1 + 8 * f + 2), (bnd - 1.5, yc + 1 + 8 * f + 2)], (70, 56, 50),
+                strength=0.4, var=0.02, layers=3, edge=0.4)                                              # 檐口转过来
+        for k in range(3):                                                                               # 正对着的墙上几个正的窗洞
+            wy_ = yc + (60 + k * 110) * f + 6
+            if wy_ > bot - 40 * f:
+                break
+            q = [(bnd + w * 0.3, wy_), (bnd + w * 0.7, wy_), (bnd + w * 0.7, wy_ + 28 * f + 4), (bnd + w * 0.3, wy_ + 28 * f + 4)]
+            wc.wash(P, q, (60, 46, 44), strength=0.5, var=0.015, layers=3, edge=0.4)
+        sw_ = w * 1.4
+        sh = [(bnd + 2, yc + 3), (bnd - sw_, yc + 3 + sw_ * 1.1), (bnd - sw_ * 0.9, bot - 4), (bnd + 2, bot)]
+        shm = wc.poly_mask(sh) * S(0.25, 0.5, 0.5 * P.vstreak + 0.5 * P.grain + 0.4 * S(bnd - sw_ * 0.6, bnd, xf))
+        P.add(shm.astype(np.float32), (118, 100, 88), 0.5, granulate=0.2)
+    # 右边背光：立面朝左，吃对面亮墙反过来的光——整面一层很淡的暖（先擦浅再加色，往深色上直接加暖只会更暗）
+    bnc = (covR * (1 - dist) * (0.5 + 0.5 * S(0.4, 0.7, wc.noise(60, 40, octaves=3))) * (1 - fadeR * 0 )).astype(np.float32)
+    bnc *= (yf < ly(xf, 760, "R")).astype(np.float32)
+    P.lift(bnc * 0.2, 1.0)
+    P.add(bnc, (170, 128, 96), 0.2)
+    # 右边檐口底下一线反光
+    for xa, xb, T, _ in R_segs[2:]:
+        f0 = (xa - VP[0]) / (W - VP[0])
+        e = 8 * f0 + 3
+        lip = wc.stroke_mask([(xa + 2, ly(xa + 2, T, "R") + e + 3), (xb - 2, ly(xb - 2, T, "R") + e + 3)], 1.8 * f0 + 0.8, 1.8 * f0 + 0.8, taper=False, rough=0.2)
+        P.lift((lip * S(0.35, 0.6, P.grain) * 0.3).astype(np.float32), 1.0)
+    # 右边：远的那栋（540–640）往街上凸出来，楼角露出正对我们的山墙。背光，但吃不到对面的反光 → 冷；先擦掉一半再铺冷灰
+    bnd = 540
+    xa, xb, T, _ = R_segs[2]
+    f = (bnd - VP[0]) / (W - VP[0])
+    w = 18 * f + 6
+    xc = bnd - w
+    yc = ly(xc, T, "R")
+    bot = ly(bnd, 800, "R") - 20
+    endw = [(xc, yc), (bnd + 1.5, yc), (bnd + 1.5, bot), (xc, bot)]
+    em = wc.poly_mask(endw) * S(0.02, 0.3, wc.blur(covR, 2.0))
+    P.lift((em * 0.3).astype(np.float32), 1.0)
+    wc.wash(P, endw, (70, 80, 96), strength=0.7, var=[0.006, 0.006, 0.02, 0.02], layers=8, edge=0.4,
+            fade=(1 - S(bot - 60, bot, yf)).astype(np.float32))
+    wc.wash(P, [(xc - 1, yc + 1), (bnd + 1.5, yc + 1), (bnd + 1.5, yc + 1 + 8 * f + 2), (xc - 1, yc + 1 + 8 * f + 2)], (18, 22, 28),
+            strength=0.45, var=0.02, layers=3, edge=0.4)
+    P.lift((wc.stroke_mask([(xc, yc + 0.5), (bnd + 1, yc + 0.5)], 1.6 * f + 0.8, 1.6 * f + 0.8, taper=False) * S(0.35, 0.6, P.grain) * 0.4).astype(np.float32), 1.0)
+    for k in range(3):
+        wy_ = yc + (70 + k * 120) * f + 6
+        if wy_ > bot - 50 * f:
+            break
+        q = [(xc + w * 0.3, wy_), (xc + w * 0.7, wy_), (xc + w * 0.7, wy_ + 30 * f + 4), (xc + w * 0.3, wy_ + 30 * f + 4)]
+        wc.wash(P, q, (16, 18, 26), strength=0.5, var=0.015, layers=3, edge=0.4)
+random.seed(SEED + 61)
+isolated(_volume)
+
+
+def _end_walls():
+    """高低错落的楼：远的那栋比近的高，高出去的那一截是有厚度的（她 9/28 画给我看的）。
+    街两边的楼，进深方向（垂直于街）和画面平行 → 在画上是水平线。所以远楼高出来的那块，露出的是它正对我们的那面端墙：
+    上沿从它屋顶跑到楼角那一点起，水平地往外（右边的楼往右、左边的楼往左）走，直到撞上近楼的屋顶线；下沿就是近楼的屋顶线。
+    近的比远的高时，端墙朝着消失点那边，看不见，只是一个台阶。
+    端墙在背光里（太阳在前方偏右、压得很低）：左边迎光的楼，端墙比立面深一截、偏冷；右边的楼本来就暗，端墙再冷一点，顶边吃一线逆光。"""
+    def seg_top(segs, side, x):
+        for xa, xb, T, _ in segs:
+            if xa <= x <= xb:
+                return ly(x, T, side)
+        return None
+    sky_now = (1 - S(0.02, 0.3, wc.blur(np.clip(covR + covL, 0, 1), 1.0))).astype(np.float32)
+    for segs, side in ((R_segs, "R"), (L_segs, "L")):
+        for i in range(len(segs) - 1):
+            a_, b_ = segs[i], segs[i + 1]                    # 右边：a 远 b 近；左边：a 近 b 远
+            far, nearseg = (a_, b_) if side == "R" else (b_, a_)
+            xc = a_[1]                                        # 两栋的交界
+            y_top = ly(xc, far[2], side)
+            y_nc = ly(xc, nearseg[2], side)
+            if y_top >= y_nc - 3:                             # 近的比远的高（或差不多）：端墙朝里，看不见
+                continue
+            # 近楼屋顶线在哪一点升到 y_top：ly(x, T_near) = y_top
+            T_n = nearseg[2]
+            fx = (y_top - VP[1]) / (T_n - VP[1])
+            xi = VP[0] + fx * (W - VP[0]) if side == "R" else VP[0] - fx * VP[0]
+            xi = min(xi, nearseg[1]) if side == "R" else max(xi, nearseg[0])
+            wall = [(xc, y_top), (xi, y_top), (xi, ly(xi, T_n, side)), (xc, y_nc + 2)]
+            m = wc.poly_mask(wall)
+            m = (m * np.clip(sky_now + 0.0, 0, 1)).astype(np.float32)
+            f = abs(xc - VP[0]) / (VP[0] if side == "L" else W - VP[0])
+            # 颜色 = 这栋楼自己立面靠楼角那一大块的中位数，再压深一点点、偏冷一点点：同一栋楼转了个面，不是另一块深色贴片
+            if side == "R":
+                box = P.D[int(y_top + 8):int(y_top + 8 + 90 * f + 20), int(xc - 40 * f - 8):int(xc - 3)]
+            else:
+                box = P.D[int(y_top + 8):int(y_top + 8 + 90 * f + 20), int(xc + 3):int(xc + 40 * f + 8)]
+            dmed = np.median(box.reshape(-1, 3), axis=0)
+            dt = dmed * (1.08 if side == "R" else 1.25) + np.array([0.03, 0.0, -0.04])
+            mm = wc.poly_mask([(xc - (1.5 if side == "R" else -1.5), y_top), (xi, y_top), (xi, ly(xi, T_n, side) + 2), (xc - (1.5 if side == "R" else -1.5), y_nc + 2)])
+            mm = np.clip(wc.blur(mm, 0.7) * (0.9 + 0.2 * wc.noise(10, octaves=2)), 0, 1) * S(0.02, 0.6, sky_now + wc.poly_mask(wall)) * (1 - 0.6 * dist)
+            noise_d = (0.9 + 0.2 * wc.noise(20, 8, octaves=3))[..., None]
+            P.D = P.D * (1 - mm[..., None]) + (dt[None, None, :] * noise_d) * mm[..., None]
+            # 顶边：一线逆光（被纸纹咬碎）；贴着底下一窄条檐影
+            top_line = wc.stroke_mask([(xc, y_top + 1), (xi, y_top + 1)], 1.6 * f + 1.0, 1.4 * f + 0.8, taper=False, rough=0.2)
+            P.lift((top_line * S(0.3, 0.6, P.grain) * 0.5 * (1 - 0.5 * dist)).astype(np.float32), 1.0)
+            eave = [(xc, y_top + 2.5), (xi, y_top + 2.5), (xi, y_top + 2.5 + 7 * f + 2), (xc, y_top + 2.5 + 7 * f + 2)]
+            wc.wash(P, eave, (22, 24, 30) if side == "R" else (84, 70, 64), strength=0.18, var=0.02, layers=3, edge=0.4,
+                    fade=wc.poly_mask(wall).astype(np.float32))
+            # 端墙上一两扇正的窗（这面墙和画面平行 → 窗是正的矩形）
+            if abs(xi - xc) > 24:
+                for k in range(2):
+                    wx = xc + (xi - xc) * (0.3 + 0.35 * k)
+                    wy = y_top + (16 + 34 * k) * f + 8
+                    ww, wh = 7 * f + 3, 20 * f + 6
+                    q = [(wx - ww / 2, wy), (wx + ww / 2, wy), (wx + ww / 2, wy + wh), (wx - ww / 2, wy + wh)]
+                    wc.wash(P, q, (18, 20, 26) if side == "R" else (70, 56, 52), strength=0.55, var=0.015, layers=3, edge=0.4,
+                            fade=wc.poly_mask(wall).astype(np.float32))
+random.seed(SEED + 62)
+isolated(_end_walls)
 
 
 
@@ -385,9 +565,12 @@ wc.wash(P, [(360, 610), (420, 608), (421, 634), (360, 636)], DEEP, strength=1.0,
 P.lift(wc.stroke_mask([(358, 603), (422, 600)], 2.2, 2.2, taper=False) * 0.85, 1.0)
 wc.dab(P, 372, 612, 3, GOLD, 1.0, soft=0.6)          # 路牌一点暖
 P.add(wc.stroke_mask([(392, 602), (388, 560), (384, 530)], 1.6, 1.0, taper=False), DEEP, 0.9)
-d2 = (xf - 390) ** 2 + (yf - 676) ** 2
-P.lift(np.clip(np.exp(-d2 / (2 * 8.0 ** 2)) * 1.8, 0, 1).astype(np.float32), 1.0)
-P.add((np.exp(-d2 / (2 * 22.0 ** 2)) * 0.35).astype(np.float32), LAMP, 0.9)
+# 两盏小灯，一大一小、不在正中——一只圆圆的大亮灯在正中像「发光独眼」（哥）
+for lx_, ly_, r_, a_ in ((374, 677, 4.2, 1.0), (405, 678, 3.2, 0.75)):
+    d2 = (xf - lx_) ** 2 + ((yf - ly_) * 1.5) ** 2
+    P.lift(np.clip(np.exp(-d2 / (2 * r_ ** 2)) * 1.8 * a_, 0, 1).astype(np.float32), 1.0)
+    P.add((np.exp(-d2 / (2 * (r_ * 2.6) ** 2)) * 0.3 * a_).astype(np.float32), LAMP, 0.9)
+P.lift((wc.stroke_mask([(364, 648), (416, 646)], 3.0, 2.4, taper=False) * S(0.3, 0.55, P.grain) * 0.35).astype(np.float32), 1.0)   # 车头下一截反着天光
 
 # 车：只给一块车身 + 深车窗 + 车顶一线亮，下沿化开
 def car(x, y, w, h, tone, lights=RUST):
@@ -479,6 +662,13 @@ person(298, 688, (110, 110, 118), True, 1)
 person(318, 694, (110, 110, 118), True, -1)
 
 # ================= 第三遍：影子、倒影 =================
+# 随机数存档：第三遍开头把两条随机数流存成文件，以后前面（楼、窗、车、人）怎么改，地上的树影、倒影一丝不变（「局部修改不许带歪别处」第 3 招）
+import pickle
+_ST = os.path.join(HERE, f"example_state_pass3_{SEED}.pkl")
+if os.path.exists(_ST):
+    _s = pickle.load(open(_ST, "rb")); wc.rng.bit_generator.state = _s["np"]; random.setstate(_s["py"])
+else:
+    pickle.dump({"np": wc.rng.bit_generator.state, "py": random.getstate()}, open(_ST, "wb"))
 # 楼影：两三笔，从右边的暗块伸出来，朝左下；近根部硬，远了淡
 hdry = wc.noise(4, 260, octaves=2, persistence=0.45)
 def sdir(p):
@@ -571,20 +761,32 @@ for lo, hi, amt in [(0.62, 0.635, 0.3), (0.72, 0.735, 0.25)]:
 # ================= 最后：少量线 =================
 # 电线：三根，粗细渐变、断、越远越淡，穿过暗块时自己没了
 dark_mask = S(0.45, 0.7, 1 - np.exp(-P.D.mean(axis=2)))
-for pts, w0 in [([(-20, 150), (160, 330), (338, 520)], 2.2), ([(940, 300), (640, 430), (344, 526)], 2.0),
-                ([(120, -10), (250, 290), (336, 512)], 1.8), ([(-20, 222), (190, 380), (340, 530)], 1.6),
-                ([(600, -10), (470, 300), (345, 516)], 1.5)]:
-    m = wc.stroke_mask(pts, w0, 0.6, taper=False, rough=0.4)
+# 电线：原来五根从画框边扎向同一个点，像放射状辅助线（哥）。现在：一根横过马路的跨线，在两根灯杆之间松松地垂着；
+# 顺着街的只画近处一段，在两个挂点之间各自往下垂，往里走就断了、没了——不再往一个点收
+def sag(p0, p1, dip, n=24):
+    return [(p0[0] + (p1[0] - p0[0]) * t, p0[1] + (p1[1] - p0[1]) * t + dip * 4 * t * (1 - t)) for t in np.linspace(0, 1, n)]
+wires = [(sag((-20, 196), (212, 334), 16), 2.0, 1.4),          # 顺街：画框边 → 近灯杆
+         (sag((212, 334), (292, 438), 6), 1.4, 0.7),           # 再往里一段，淡了
+         (sag((212, 331), (609, 378), 30), 1.5, 1.0),          # 跨线：两根灯杆之间横过马路
+         (sag((940, 262), (609, 380), 22), 1.8, 1.2)]          # 右边：画框边 → 右灯杆
+for pts, w0, w1 in wires:
+    m = wc.stroke_mask(pts, w0, w1, taper=False, rough=0.4)
     far = np.clip(1 - np.hypot(xf - VP[0], yf - 520) / 500.0, 0, 1)
     m = m * (1 - 0.8 * far) * (1 - dark_mask) * S(0.35, 0.45, wc.noise(30, octaves=2) * 0.6 + 0.4 * P.grain)
-    P.add(m.astype(np.float32), DEEP, 1.0)
+    P.add(m.astype(np.float32), (58, 62, 68), 1.0)
 # 灯杆两根：上半截硬，下半截化进人群
-for x, yb, yt, arm in [(214, 770, 330, 80), (610, 740, 380, -64), (455, 690, 540, -34)]:
-    m = wc.stroke_mask([(x, yb), (x + 1, yt)], 4.4, 2.0, taper=False, rough=0.15)
-    m *= np.clip((yb - 30 - yf) / 120.0, 0, 1) ** 0.7
-    P.add(m.astype(np.float32), DEEP, 1.1)
-    P.add(wc.stroke_mask([(x, yt), (x + arm * 0.45, yt - 16), (x + arm, yt - 8)], 2.4, 1.3, taper=False), DEEP, 1.0)
-    wc.dab(P, x + arm, yt - 6, 5.5, DEEP, 1.1, squash=0.45)
+# 灯杆：不再是三根一样的纯黑直尺（哥：太完整、太直、太黑）。近的那根画完整、落地（她：近的明确的东西要完整），
+# 但颜色是暖的深灰、手画的微弯、上细下粗；中间那根走到暗楼前面就和楼同值、自己没了；远的那根进了雾
+for x, yb, yt, arm, tone, stg, lost_dark in [(214, 770, 330, 80, (80, 74, 74), 0.95, 0.0), (610, 740, 380, -64, (52, 58, 66), 1.0, 0.85),
+                                             (455, 690, 540, -34, (110, 114, 122), 0.7, 0.0)]:
+    pts = [(x, yb), (x + 1.5, (yb + yt) / 2 + 20), (x + 0.5, yt + 30), (x + 2, yt)]
+    m = wc.stroke_mask(pts, 4.6, 2.2, taper=False, rough=0.2)
+    m *= np.clip((yb - 8 - yf) / 60.0, 0, 1) ** 0.7
+    m *= 1 - lost_dark * dark_mask
+    m *= 0.8 + 0.2 * S(0.3, 0.6, P.vstreak)
+    P.add(m.astype(np.float32), tone, stg)
+    P.add(wc.stroke_mask([(x + 2, yt), (x + arm * 0.45, yt - 16), (x + arm, yt - 8)], 2.4, 1.3, taper=False), tone, stg * 0.95)
+    wc.dab(P, x + arm, yt - 6, 5.5, tone, stg, squash=0.45)
 # 红绿灯：两盏，一点红
 for x, y in [(300, 628), (446, 622), (318, 640)]:
     P.add(wc.stroke_mask([(x, y + 8), (x, y + 50)], 2.0, 2.0, taper=False) * (1 - dark_mask), DEEP, 0.9)
@@ -684,8 +886,11 @@ def wash_many(polys, layers=9, var=0.06):
     return np.clip(acc / layers * 1.3, 0, 1)
 
 far_polys, mid_polys, near_polys = [], [], []
+TREE_KEEP = random.Random(SEED + 90)                              # 叶团减三成（哥：树像另一套素材盖在画上）
 for _ in range(14):                                               # 左上角：包住那个角
     cx, cy = random.uniform(-40, 230), random.uniform(-40, 200)
+    if TREE_KEEP.random() < 0.15:
+        continue
     if cx / 230 + cy / 200 > 1.25:
         continue
     far_polys.append(blob(cx, cy, random.uniform(30, 55)))
@@ -696,6 +901,8 @@ for _ in range(14):                                               # 左上角：
 for tx, ty in tips:
     if ty > 500 or tx > 500:
         continue
+    if TREE_KEEP.random() < 0.15:
+        continue
     if random.random() < 0.55:
         far_polys.append(blob(tx + random.gauss(0, 30), ty + random.gauss(-10, 22), random.uniform(22, 42)))
     if random.random() < 0.45:
@@ -705,11 +912,14 @@ for tx, ty in tips:
 
 far = wash_many(far_polys, var=0.08)
 far *= S(0.3, 0.55, 0.6 * wc.noise(22, octaves=3) + 0.4 * wc.noise(60, octaves=2))       # 边碎、漏天
+lostT = (0.7 * S(0.5, 0.72, wc.noise(80, octaves=2))).astype(np.float32)                       # 树冠有几处轮廓化进天里：和天用同一种湿
+far = (far * (1 - lostT) + wc.blur(far, 8) * lostT * 0.75).astype(np.float32)
 P.add(far, BLUEG, 0.2, edge=0.4, edge_r=2.0, granulate=0.3)
 wc.wet(P, (far * S(0.55, 0.75, wc.noise(50, octaves=3))).astype(np.float32), OCHRE, strength=0.25, spread=3, bloom=0.5)   # 湿接湿掉进一点赭石
 
 mid = wash_many(mid_polys, var=0.07)
 mid *= S(0.35, 0.55, 0.55 * wc.noise(14, octaves=3) + 0.45 * P.grain)
+mid = (mid * (1 - 0.6 * lostT) + wc.blur(mid, 4) * lostT * 0.5).astype(np.float32)
 P.add(mid, OLIVE, 0.3, edge=0.5, edge_r=1.5, granulate=0.35)
 
 near = wash_many(near_polys, var=0.06)
@@ -720,7 +930,7 @@ flick = Image.new("L", (W * AA, H * AA), 0); df = ImageDraw.Draw(flick)
 for tx, ty in tips:
     if ty > 520 or tx > 520:
         continue
-    for _ in range(random.randint(1, 5)):
+    for _ in range(random.randint(1, 4)):                        # 甩出去的小叶少一点：多了像撒的纸屑
         cx, cy = tx + random.gauss(0, 34), ty + random.gauss(0, 26)
         L = random.uniform(4, 9); ang = random.uniform(0, 6.28)
         pts = []
@@ -739,6 +949,7 @@ for pts, w in segs:
 bmask = mask_from(bm, 0.4)
 leafcov = np.clip(mid + near, 0, 1)
 bmask = bmask * (1 - 0.6 * leafcov)
+bmask = bmask * (0.55 + 0.45 * S(0.3, 0.6, wc.noise(46, octaves=2))) * (1 - 0.4 * lostT)       # 枝也有几截没了，和叶一样化进天
 trunk_tex = S(0.3, 0.5, 0.6 * P.vstreak + 0.4 * P.grain)
 P.add((bmask * (0.65 + 0.35 * trunk_tex)).astype(np.float32), (104, 100, 96), 0.55, edge=0.3, edge_r=1.2)
 

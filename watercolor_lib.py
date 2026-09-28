@@ -317,3 +317,34 @@ def splatter(paper, n, box, color, rmin=0.8, rmax=3.2, strength=1.2):
         r = random.uniform(rmin, rmax) ** 1.0
         dab(paper, random.uniform(x0, x1), random.uniform(y0, y1), r, color, strength,
             soft=0.5, squash=random.uniform(0.6, 1.0), rot=random.uniform(0, 3.14))
+
+
+def brush(paper, pts, w, color=(30, 22, 36), strength=1.4, entry=0.08, dry_from=0.65, n=80):
+    """一笔书法（哥 9/28：「最后在焦点附近落几笔真正硬、快、带方向的深色，别继续整体柔化」）：
+    起笔很快变粗、收笔尖，硬边不糊；dry_from 之后笔干了，毛只挂在纸纹凸起上。pts 是笔走的路线（2–5 个点就够）。"""
+    pts = np.array(pts, np.float32)
+    seg = np.r_[0, np.cumsum(np.hypot(*np.diff(pts, axis=0).T))]
+    t = np.linspace(0, 1, n)
+    cx = np.interp(t * seg[-1], seg, pts[:, 0]); cy = np.interp(t * seg[-1], seg, pts[:, 1])
+    k = np.ones(7) / 7
+    cx = np.convolve(np.pad(cx, 3, mode="edge"), k, "valid"); cy = np.convolve(np.pad(cy, 3, mode="edge"), k, "valid")
+    dx, dy = np.gradient(cx), np.gradient(cy)
+    L = np.hypot(dx, dy) + 1e-6
+    nx, ny = -dy / L, dx / L
+    wid = w * np.clip(t / entry, 0.35, 1) * (1 - t) ** 0.55
+    aa = 3
+    M = Image.new("L", (W * aa, H * aa), 0); T = Image.new("L", (W * aa, H * aa), 0)
+    dm, dt = ImageDraw.Draw(M), ImageDraw.Draw(T)
+    for i in range(n - 1):
+        q = [(cx[i] + nx[i] * wid[i] / 2, cy[i] + ny[i] * wid[i] / 2), (cx[i + 1] + nx[i + 1] * wid[i + 1] / 2, cy[i + 1] + ny[i + 1] * wid[i + 1] / 2),
+             (cx[i + 1] - nx[i + 1] * wid[i + 1] / 2, cy[i + 1] - ny[i + 1] * wid[i + 1] / 2), (cx[i] - nx[i] * wid[i] / 2, cy[i] - ny[i] * wid[i] / 2)]
+        q = [(a * aa, b * aa) for a, b in q]
+        dm.polygon(q, fill=255); dt.polygon(q, fill=int(255 * t[i]))
+    m = np.asarray(M.resize((W, H), Image.BOX), np.float32) / 255.0
+    tt = np.asarray(T.resize((W, H), Image.BOX), np.float32) / 255.0 / np.maximum(m, 1e-3)
+    thr = np.clip((tt - dry_from) / (1 - dry_from + 1e-6), 0, 1) * 0.75
+    m = m * smoothstep(thr - 0.06, thr + 0.06, paper.grain)
+    if color is None:
+        return np.clip(m, 0, 1).astype(np.float32)
+    paper.add(np.clip(m, 0, 1).astype(np.float32), color, strength)
+    return np.clip(m, 0, 1).astype(np.float32)

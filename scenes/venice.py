@@ -421,83 +421,85 @@ for x, h in [(400, 30), (412, 29), (486, 28)]:
     tiny(x, yb, h)
 
 # ================= 第三遍：水面 =================
-# 倒影：每一列以自己的水线为轴翻下来（桥那一段以桥脚为轴）；竖着拉长、横着只糊一点，再被横向的波纹打断
+# 哥（9/28 深夜）：「约瑟夫式水面往往不是把水画满，而是一两片大洗色定基调，几组深色横笔切开，再靠纸白闪光。」
+# 上一版满河都是同一种噪声切出来的浅色碎片 + 到处一样的横向错位——最明显的代码痕迹。现在：
+#   倒影是湿的、竖着化开的一大片（慢慢弯，不锯齿）；只有三四片水在动；其余整片安静。
 axis = np.where((xf[0] > xL) & (xf[0] < xR), BY, water_y(xf[0])).astype(np.float32)
-# 水不是镜子：水面本来就有波，船、桨、桩子都会把它搅乱。倒影按一张位移场去取——
-# 一横条一横条各自往左右错（竖的东西倒下来成锯齿），越近错得越大；贡多拉后面拖一道 V 字尾浪，桩子脚下一圈圈的纹
 near0 = np.clip((yf - 640) / 480.0, 0, 1)
-wav = (wc.noise(2.4, 34, octaves=3, persistence=0.55) - 0.5) * 2
-dx = wav * (2.5 + 26 * near0)
-dy = (wc.noise(5, 60, octaves=2) - 0.5) * 2 * (1 + 6 * near0)
-GS = (160.0, 814.0)                    # 船尾
-wake = np.zeros((H, W), np.float32); wake_ph = np.zeros((H, W), np.float32)
-for ddx, ddy in ((-1.0, -0.10), (-1.0, 0.22)):
-    n_ = math.hypot(ddx, ddy); ux_, uy_ = ddx / n_, ddy / n_
-    t = (xf - GS[0]) * ux_ + (yf - GS[1]) * uy_
-    dperp = np.abs(-(xf - GS[0]) * uy_ + (yf - GS[1]) * ux_)
-    arm = np.exp(-(dperp / (3 + 0.07 * np.clip(t, 0, None))) ** 2) * (t > 0) * np.exp(-np.clip(t, 0, None) / 260.0)
-    wake_ph = np.where(arm >= wake, t, wake_ph); wake = np.maximum(wake, arm)
-inside_v = S(0.0, 0.3, wake) + ((xf < GS[0]) & (yf > GS[1] - 0.10 * (GS[0] - xf)) & (yf < GS[1] + 0.22 * (GS[0] - xf))) * np.exp(-(GS[0] - xf).clip(0) / 220.0) * 0.6
-dx = dx + (np.sin(wake_ph * 0.32) * 14 * wake + (wc.noise(3, 14, octaves=2) - 0.5) * 24 * inside_v)
-hullzone = np.exp(-(((xf - 355) / 230.0) ** 2 + ((yf - 822) / 14.0) ** 2))          # 船身两侧推开的水
-dx = dx + (wc.noise(2, 10, octaves=2) - 0.5) * 20 * hullzone
+near = near0
+# 水是这张的戏（她：「详的东西放在水上」），但不是一把刷子铺满：每片水纹有自己的手——(cx, cy, rx, ry, 纹的竖尺度, 横尺度, 阈值)
+ZONES = [(250, 852, 300, 64, 5, 55, 0.6, "mix"),        # 船和尾浪：短、碎，亮暗都有
+         (770, 1000, 260, 150, 11, 160, 0.6, "dark"),    # 右前：长、宽，暖倒影被深的横纹切开
+         (160, 1070, 270, 110, 13, 120, 0.58, "light"),  # 左下角：宽的一片片天光
+         (462, 712, 150, 46, 3.5, 90, 0.62, "light"),    # 桥洞底下：细、密的亮
+         (675, 782, 170, 56, 6, 70, 0.62, "mix"),        # 桩子一带
+         (470, 1110, 190, 60, 8, 100, 0.66, "dark")]     # 正前方：稀的深纹
+# 安静的地方只留两三块：船前面偏右那片、左边中段、右边暗柱的倒影里
+def _zone_map():
+    z = np.zeros((H, W), np.float32)
+    for cx_, cy_, rx, ry, *_ in ZONES:
+        z = np.maximum(z, np.exp(-(((xf - cx_) / rx) ** 2 + ((yf - cy_) / ry) ** 2)).astype(np.float32))
+    return np.clip(z * (0.6 + 0.6 * wc.noise(20, 60, octaves=2)), 0, 1).astype(np.float32)
+_h = []
+isolated(lambda: _h.append(_zone_map()))
+ACTIVE = _h[0]
+slow = (wc.noise(16, 200, octaves=2) - 0.5) * 2 * (2 + 9 * near0)            # 慢的弯：竖的东西倒下来轻轻扭一下
+fast = (wc.noise(2.4, 34, octaves=3) - 0.5) * 2 * (2 + 20 * near0) * ACTIVE   # 快的碎：只在那几片
+dx = slow + fast
+dy = (wc.noise(5, 60, octaves=2) - 0.5) * 2 * (1 + 5 * near0) * ACTIVE
 src_y = np.clip((2 * axis[None, :] - yf + dy).astype(np.int32), 0, H - 1)
 src_x = np.clip((xx + dx).astype(np.int32), 0, W - 1)
 Dsrc = P.D.copy()
 Dref = Dsrc[src_y, src_x]
 below = S(axis[None, :] + 0.5, axis[None, :] + 3, yf) * water
-Dref = np.stack([wc.blur2(Dref[..., c], 2.5, 1.2) for c in range(3)], axis=-1)       # 只糊一点：乱是位移给的，不是糊出来的
-Dref = Dref * (0.85 + 0.3 * P.vstreak)[..., None]                     # 竖着有一点深浅，不是一张平的反射图
-near = near0
-# 水面不规矩的那一层：反着天光的亮块从噪声里长出来——横着压扁、硬边、近处大远处碎（跟例图地上树影同一个路子）
-dens = 0.6 * wc.noise(6 + 10 * 0.5, 120, octaves=4, persistence=0.55) + 0.4 * wc.noise(30, 260, octaves=2)
-thr_w = 0.6 - 0.1 * near
-breaks = S(thr_w - 0.012, thr_w + 0.012, dens) * below
-keep = (1 - breaks * 0.85) * below * (0.86 - 0.14 * near)
+Dref = np.stack([wc.blur2(Dref[..., c], 9, 1.6) for c in range(3)], axis=-1)       # 湿的：竖着化开，不是一张镜子
+keep = below * (0.84 - 0.2 * near) * (1 - 0.25 * S(0.3, 0.9, near) * (1 - ACTIVE))     # 近处静水里倒影淡下去，交给大洗色
 P.D += Dref * keep[..., None] * 0.9
-P.lift((breaks * 0.35).astype(np.float32), 1.0)
-# 尾浪的浪脊反着天光（亮）、浪谷里是楼的暗——一道一道碎的
-crest = S(0.55, 0.7, np.sin(wake_ph * 0.32)) * S(0.15, 0.4, wake) * water
-P.lift((crest * S(0.3, 0.55, P.grain) * 0.6).astype(np.float32), 1.0)
-trough = S(0.55, 0.7, -np.sin(wake_ph * 0.32)) * S(0.15, 0.4, wake) * water
-P.add((trough * 0.6).astype(np.float32), (50, 62, 70), 0.3)
-# 桨入水的地方、桩子脚下：一圈圈扁的纹
-for cx_, cy_, rmax in [(262, 836, 30), (628, 718, 16), (646, 720, 16), (700, 730, 20)]:
-    rr = np.hypot(xf - cx_, (yf - cy_) / 0.28)
-    rings = np.zeros((H, W), np.float32)
-    for k, r0 in enumerate(np.linspace(rmax * 0.3, rmax, 3)):
-        rings = np.maximum(rings, np.exp(-((rr - r0) / 1.4) ** 2) * (1 - 0.25 * k))
-    P.lift((rings * water * S(0.3, 0.55, P.grain) * 0.6).astype(np.float32), 1.0)
-# 倒影趁湿：几处深一块开花，边自己跑
-wc.wet(P, (below * (1 - breaks) * S(0.6, 0.78, wc.noise(40, 90, octaves=3))).astype(np.float32), (46, 60, 64), strength=0.3, spread=4, bloom=0.7)
-P.add((below * breaks * 0.4).astype(np.float32), TEAL, 0.15)
-# 光道的边也在水里：跟着同一张波纹位移场扭（她：「一定不是这么直的，一定是和水波纹一起扭动的」）。
-# 第一遍按直的光道留了白，这里补差：扭出去的地方擦亮，扭进来的地方补上水的颜色
+# 碎片只留在那几片动的水里（原来满河都是）：横着压扁、硬边、近处大远处碎
+big = wc.noise(34, 240, octaves=2)
+breaks = np.zeros((H, W), np.float32)
+darks = np.zeros((H, W), np.float32)
+for cx_, cy_, rx, ry, sy_, sx_, thr, kind in ZONES:
+    zm = np.exp(-(((xf - cx_) / rx) ** 2 + ((yf - cy_) / ry) ** 2)) * (0.7 + 0.5 * wc.noise(max(rx, ry) * 0.3, octaves=2))
+    nz = wc.noise(sy_, sx_, octaves=4, persistence=0.55)
+    dens = 0.62 * nz + 0.38 * big
+    t_ = thr - 0.05 * near + 0.12 * (1 - np.clip(zm, 0, 1))          # 片的中心密、往外越来越稀，不是一刀切的边
+    zz = S(0.12, 0.4, zm)
+    if kind in ("light", "mix"):
+        breaks = np.maximum(breaks, (S(t_ - 0.012, t_ + 0.012, dens) * zz).astype(np.float32))
+    if kind in ("dark", "mix"):
+        dd = 0.62 * (1 - nz) + 0.38 * big                              # 深纹长在亮纹的缝里：同一片水的波谷
+        td = t_ + (0.04 if kind == "mix" else 0.0)
+        darks = np.maximum(darks, (S(td - 0.012, td + 0.012, dd) * zz).astype(np.float32))
+breaks = (breaks * below).astype(np.float32)
+darks = (darks * below * (1 - breaks)).astype(np.float32)
+P.D *= (1 - breaks * 0.62)[..., None]
+P.lift((breaks * 0.12).astype(np.float32), 1.0)
+P.D *= (1 + darks * 0.7)[..., None]                                  # 波谷：就是那一处倒影自己的颜色压深
+# 一两片大洗色：整片深的蓝绿压下去定基调，湿接湿，只在两处开一点花
+wc.wet(P, (water * (0.35 + 0.65 * near)).astype(np.float32), (46, 86, 88), strength=0.3, spread=20, granulate=0.2)
+wc.wet(P, (below * S(0.62, 0.8, wc.noise(70, 160, octaves=2)) * near).astype(np.float32), (40, 58, 62), strength=0.25, spread=10, bloom=0.35)
+# 光道：桥洞底下一片软的亮，跟着慢的弯扭；不再是一格一格的梯子
 path_w = np.exp(-(((xf + 1.3 * dx - (GLARE[0] + 20) - (yf - 640) * 0.05) / (26 + (yf - 640).clip(0) * 0.28)) ** 2))
 dpath = (path_w - path) * wtone * water
-P.lift((np.clip(dpath, 0, 1) * 0.55).astype(np.float32), 1.0)
+P.lift((np.clip(dpath, 0, 1) * 0.5).astype(np.float32), 1.0)
 P.add((np.clip(-dpath, 0, 1)).astype(np.float32), TEAL, 0.5, granulate=0.2)
-P.add((np.clip(-dpath, 0, 1) * (1 - breaks)).astype(np.float32), (60, 70, 76), 0.25)
 path = path_w
-# 参考里的光道：不是一根亮柱子，是一格一格横着的白（天光在波峰上），中间夹着深的水，越近格子越大越疏
-def _ladder():
-    n_far = wc.noise(1.2, 90, octaves=2, persistence=0.5)
-    n_near = wc.noise(6.5, 230, octaves=3, persistence=0.5)
+# 光道是这张水的主角：一条亮的天光从桥洞底下一路铺到脚下——亮是一片片碎的，远处细密、近处宽大，形状各不一样，不是一格一格的梯子
+def _path_glitter():
+    pw = np.clip(path_w * 1.25, 0, 1) * water
+    P.lift((pw * (0.28 + 0.22 * wc.noise(40, 120, octaves=2))).astype(np.float32), 1.0)
+    n_far = wc.noise(2.2, 60, octaves=3, persistence=0.55)
+    n_near = 0.6 * wc.noise(9, 150, octaves=4, persistence=0.55) + 0.4 * wc.noise(26, 260, octaves=2)
     n_ = (1 - near) * n_far + near * n_near
-    lad = S(0.53 - 0.06 * near, 0.555 - 0.06 * near, n_) * water           # 越近亮格子越大越多
-    P.add((path_w * (1 - lad) * water * S(0.0, 0.25, near)).astype(np.float32), (40, 78, 82), 0.45, granulate=0.2)   # 格子之间是深的水
-    P.lift((path_w * lad * 0.75).astype(np.float32), 1.0)
-    # 整片水再压一层深的蓝绿：约瑟夫的水是深的，亮的只有光道和几片反光
-    P.add((water * (0.3 + 0.7 * near) * (1 - 0.8 * path_w * lad) * (1 - 0.6 * breaks)).astype(np.float32), (46, 86, 88), 0.32, granulate=0.2)
+    thr = 0.56 - 0.05 * near + 0.18 * (1 - pw)                     # 光道中间亮片多，往两边越来越稀
+    gl = S(thr - 0.012, thr + 0.012, n_) * S(0.08, 0.3, pw)
+    P.lift((gl * (0.55 + 0.25 * near)).astype(np.float32), 1.0)
+    P.add((gl * 0.6).astype(np.float32), (214, 206, 186), 0.1)
+    P.add((pw * (1 - gl) * S(0.0, 0.5, near)).astype(np.float32), (40, 78, 82), 0.28, granulate=0.2)   # 亮片之间是深的水
+isolated(_path_glitter)
 
-
-isolated(_ladder)
-# 桥后的光在水里：一条竖的亮，被横纹打碎
-glint = path * water * S(0.35, 0.7, 0.6 * wc.noise(2.5, 40, octaves=3) + 0.4 * P.grain)
-P.lift((glint * 0.85).astype(np.float32), 1.0)
-P.add((glint * 0.5).astype(np.float32), GOLD, 0.18)
-
-# 光路是亮底子：深色的横扫只扫在这里，越往后越干（暗底子上扫深色会像扫描线）
+# 横笔：一笔一笔的，聚成几组，每组长短不一；中间大片不碰
 hd = wc.noise(3.5, 240, octaves=2, persistence=0.45)
 def swipe(x0, y0, length, w, dry0, dry1, d=-1):
     x1 = x0 + d * length
@@ -514,14 +516,43 @@ def swipe(x0, y0, length, w, dry0, dry1, d=-1):
     inside = ((r < 1) & (xf >= xa_) & (xf <= xb_)).astype(np.float32)
     dry = dry0 + (dry1 - dry0) * tpos + 0.3 * r ** 2
     return inside * S(dry - 0.015, dry + 0.015, 0.75 * hd + 0.25 * P.grain)
-random.seed(SEED + 40)
-sw = np.zeros((H, W), np.float32)
-for _ in range(16):
-    y0 = random.uniform(700, 1130)
-    nr = (y0 - 640) / 480
-    x0 = random.uniform(300, 620)
-    sw = np.maximum(sw, swipe(x0, y0, random.uniform(120, 420), random.uniform(3, 14) * (0.5 + nr), 0.2, random.uniform(0.45, 0.7), d=random.choice([-1, 1])))
-# （试过：这里横扫深色，光路不够亮，还是像扫描线。先不用。）
+
+
+def _strokes():
+    rs = random.Random(SEED + 60)
+    # 1) 纸白闪光：光道里和桥洞底下，一小撮横的干笔（亮、碎），越近越长；不是白条
+    lite = np.zeros((H, W), np.float32)
+    for y0, n in ((684, 4), (706, 3), (740, 3), (800, 2), (905, 2), (1050, 2)):
+        for _ in range(n):
+            yy0 = y0 + rs.uniform(-14, 14)
+            nr = near0[int(yy0), 0]
+            cx_ = GLARE[0] + 20 + (yy0 - 640) * 0.05 + rs.uniform(-34, 34) * (0.4 + nr)
+            L_ = rs.uniform(18, 70) * (0.5 + 1.5 * nr)
+            lite = np.maximum(lite, swipe(cx_ + L_ / 2, yy0, L_, rs.uniform(1.2, 3.0) * (0.6 + nr), 0.42, rs.uniform(0.62, 0.85), d=-1))
+    P.lift((lite * water * 0.5).astype(np.float32), 1.0)
+    P.add((lite * water).astype(np.float32), (214, 206, 186), 0.1)
+    # 2) 几组深色横笔切开：颜色是那一处倒影自己的颜色压深（暖墙底下是暗赭、别处是暗蓝绿），不是黑；
+    #    笔是扁的、有厚度、微微弯，有的一刀硬边，有的落在还湿的水上化开一边
+    groups = [((200, 838), 5, (40, 130), 1.0), ((440, 846), 3, (30, 80), 0.8), ((668, 746), 2, (18, 40), 0.6), ((770, 992), 5, (50, 170), 1.25)]
+    img_D = P.D.copy()
+    for (gx, gy_), n, (lmin, lmax), sc in groups:
+        for k in range(n):
+            y0 = gy_ + rs.uniform(-10, 10) * sc + k * rs.uniform(4, 10) * sc
+            x0 = gx + rs.uniform(-70, 70) * sc
+            nr = near0[int(min(H - 1, y0)), 0]
+            L_ = rs.uniform(lmin, lmax)
+            d_ = rs.choice([-1, 1])
+            sag = rs.uniform(-3, 3) * sc
+            pts = [(x0, y0), (x0 + d_ * L_ * 0.35, y0 + sag), (x0 + d_ * L_ * 0.7, y0 + sag * 0.6), (x0 + d_ * L_, y0 + rs.uniform(-2, 2))]
+            xi, yi_ = int(np.clip(x0 + d_ * L_ * 0.4, 0, W - 1)), int(np.clip(y0, 0, H - 1))
+            dloc = img_D[max(0, yi_ - 6):yi_ + 6, max(0, xi - 10):xi + 10].reshape(-1, 3).mean(axis=0)
+            col = tuple(int(255 * c) for c in wc.PAPER * np.exp(-dloc * 1.35 - 0.12))
+            w_ = rs.uniform(2.6, 6.0) * sc * (0.55 + nr)
+            m = wc.brush(P, pts, w_, None, entry=0.07, dry_from=rs.uniform(0.45, 0.75))
+            if rs.random() < 0.45:                                            # 落在湿的上面：一边化开
+                m = np.clip(m * 0.55 + wc.blur2(m, 2.5, 1.2) * 1.1, 0, 1)
+            P.add((m * water).astype(np.float32), col, rs.uniform(0.9, 1.25))
+isolated(_strokes)
 
 # 系船桩：右岸前面几根，蓝白条，顶一个小帽；倒影是扭着的
 random.seed(SEED + 5)
@@ -547,7 +578,8 @@ gx0, gx1, gy = 150.0, 560.0, 808.0
 hull_top = [(x, gy - 22 * ((x - (gx0 + gx1) / 2) / ((gx1 - gx0) / 2)) ** 4 - 6 * ((x - gx0) / (gx1 - gx0))) for x in np.linspace(gx0, gx1, 40)]
 hull_bot = [(x, gy + 11 - 13 * ((x - (gx0 + gx1) / 2) / ((gx1 - gx0) / 2)) ** 4) for x in np.linspace(gx1 - 14, gx0 + 10, 40)]
 hull = hull_top + hull_bot
-covG = wc.wash(P, hull, (22, 24, 30), strength=1.1, var=0.008, layers=12, edge=0.5, granulate=0.08)
+covG = wc.wash(P, hull, (22, 24, 30), strength=1.1, var=0.008, layers=12, edge=0.5, granulate=0.08,
+               fade=(1 - 0.75 * S(gx1 - 150, gx1 - 20, xf) * S(gy - 16, gy + 4, yf)).astype(np.float32))      # 船头下半截化进水里（哥：别画完整轮廓）
 P.lift((wc.stroke_mask([(x, y + 1.5) for x, y in hull_top[6:34]], 1.6, 1.6, taper=True) * S(0.35, 0.55, P.grain)).astype(np.float32), 0.7)  # 船舷一线光
 # 船头的铁（ferro）：竖起来的一片，带几齿
 fx, fy = gx1 - 4, gy - 20

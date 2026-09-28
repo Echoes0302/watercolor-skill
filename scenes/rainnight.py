@@ -7,6 +7,7 @@
 第三遍：地上——楼和店按楼脚翻下来；店的倒影单独一层（狠扭、长拖、横断几截、暖往紫渗）；然后才画灯、车、人（不然会被倒影洗掉）；
         每盏灯拖下来的竖亮（同一张波纹位移场扭，横笔切断，被站在前面的人和车挡住）；车人的深倒影。
 最后：很淡的全屏雨丝、灯边上的白雨点和几点深的甩点。
+哥看完补了三条（她又校正了一条）：远处那串灯整组化成一团光；近的明确的东西画完整落地，只有远的、跟背景同值的才不完整；焦点附近落几笔硬的书法笔（wc.brush）。
 从 skill 根目录跑：python scenes/rainnight.py [seed] [values]      默认 seed 11 = 定稿
 """
 import sys, os, math, random, time
@@ -266,6 +267,10 @@ def add_glow(col, m, w=1.0):
 
 LIGHTS = []   # (x, y, 贴地 y, 半径, 颜色, 力度, 倒影长度系数)
 DX = ((wc.noise(2.6, 40, octaves=3) - 0.5) * 2 * (1.5 + 16 * near)).astype(np.float32)    # 水面波纹：一横条一横条各自往左右错
+_hold = []
+isolated(lambda: _hold.append(S(0.36, 0.6, wc.noise(150, 340, octaves=2)).astype(np.float32)))
+CALM = _hold[0]                      # 1 = 碎，0 = 一整片平静的镜面：波纹整片整片地没有，不是每处都抖一点（哥）
+DX = (DX * (0.12 + 0.88 * CALM)).astype(np.float32)
 
 
 def glow_at(m, radius, color, amt, lift=0.5):
@@ -302,6 +307,7 @@ isolated(_floors)
 # 楼上的窗：大多是比墙深一点的洞，几扇亮着暖灯（稀、不齐、边化开），远的更小更淡
 def _windows():
     random.seed(SEED + 2)
+    PRES = wc.noise(170, 140, octaves=2)          # 暗窗只留一两组，其余整层整栋没有
     for (xa, xb, hn, _) in L_segs:
         for fl in (2.7, 4.5, 6.3, 8.1, 9.9):
             if fl + 1.0 > hn - 0.4:
@@ -324,7 +330,7 @@ def _windows():
                     P.lift((np.clip(wc.blur(m, 1.4) * (0.75 + 0.35 * wc.noise(4, octaves=2)), 0, 1) * 0.88).astype(np.float32), 1.0)
                     wc.wash(P, q, col, strength=0.75, var=0.05, layers=4, edge=0.25, wet_map=np.full((H, W), 0.7, np.float32), wet_r=2.5)
                     glow_at(m, 0.25 * s + 2, col, 0.45, lift=0.35)
-                elif r < 0.55:
+                elif r < 0.55 and PRES[int(min(H - 1, max(0, ytop))), int(min(W - 1, max(0, x)))] > 0.6:
                     wc.wash(P, q, (24, 24, 44), strength=random.uniform(0.3, 0.6), var=0.03, layers=3, edge=0.3,
                             wet_map=np.full((H, W), 0.5, np.float32), wet_r=1.5)
                 x += (0.26 * s + 0.55 * s) * random.uniform(0.85, 1.25)
@@ -559,13 +565,14 @@ isolated(_shop_reflect)
 
 POSTS = []
 # ================= 灯：两边马路牙子上一排，往雾里退；间距不齐、亮度不齐 =================
-def lamp(x, base, bright=1.0, col=GLOW, double=False):
+def lamp(x, base, bright=1.0, col=GLOW, double=False, keep=0.7, draw_post=True):
     s = scale_at(base)
     hgt = 2.55 * s
     top_ = base - hgt
     w0 = max(0.8, 0.045 * s)
     post = wc.stroke_mask([(x, base), (x + random.uniform(-0.6, 0.6), base - hgt * 0.5), (x, top_ + 0.1 * s)], w0 * 1.3, w0 * 0.8, taper=False, rough=0.15)
-    fadeP = (1 - 0.75 * S(base - hgt * 0.45, base + 2, yf)) * (0.75 + 0.25 * S(0.3, 0.6, P.vstreak))   # 上半截硬，下半截化进雨里
+    cut = top_ + keep * hgt                                   # 只画上面 keep 这么多，下面交给雨和地上的暗（哥：一根路灯画七成）
+    fadeP = (1 - S(cut - 0.12 * hgt, cut + 0.04 * hgt, yf)) * (0.75 + 0.25 * S(0.3, 0.6, P.vstreak)) * float(draw_post)
     P.add((post * fadeP * min(1.0, 0.25 + s / 90.0)).astype(np.float32), (26, 26, 44), 1.0)
     POSTS.append((post * fadeP * min(1.0, 0.25 + s / 90.0)).astype(np.float32))
     heads = [(x - 0.2 * s, top_ + 0.14 * s), (x + 0.2 * s, top_ + 0.14 * s)] if double else [(x, top_)]
@@ -594,12 +601,20 @@ def lamp(x, base, bright=1.0, col=GLOW, double=False):
 
 def _lamps():
     random.seed(SEED + 5)
-    for x, b in ((118, 1.0), (292, 0.85), (398, 0.9), (452, 0.7), (492, 0.8), (514, 0.6), (527, 0.5)):
-        lamp(x, float(lineL(x, CURBL0)), b, col=GLOW if b > 0.65 else AMBER, double=(x == 292))
-    for x, b in ((812, 0.95), (703, 0.8), (640, 0.85), (604, 0.6), (582, 0.55), (566, 0.45)):
-        lamp(x, float(lineR(x, CURBR9)), b, col=GLOW if random.random() < 0.7 else AMBER)
-    # 雾里远处几点小灯（窗、车站），没有杆
-    for x, y, r in ((690, 548, 2.2), (760, 540, 1.8), (842, 530, 2.4), (618, 560, 1.6), (880, 552, 1.5)):
+    # 近的几根画出来（各自只画一截），远的那一串不再一根根排队往里退——整组化成街尽头一团光（哥：敢于整组消失）
+    # 近的灯是明确的东西：画完整、落地（她：近的也消失掉下半，就像飘着）；只有远的、进了雾的才虚——而且不是每根都一样
+    for x, b, kp, po in ((118, 1.0, 1.0, 1.0), (292, 0.85, 1.0, 1.0), (398, 0.9, 0.9, 0.8), (455, 0.6, 0.55, 0.3)):
+        lamp(x, float(lineL(x, CURBL0)), b, col=GLOW if b > 0.65 else AMBER, double=(x == 292), keep=kp, draw_post=po)
+    for x, b, kp, po in ((812, 0.95, 1.0, 0.9), (700, 0.7, 0.6, 0.35)):
+        lamp(x, float(lineR(x, CURBR9)), b, col=GLOW, keep=kp, draw_post=po)
+    cx_, cy_ = 548, 566
+    blob = np.exp(-(((xf - cx_) / 70.0) ** 2 + ((yf - cy_) / 26.0) ** 2)) * np.clip(0.3 + 1.0 * wc.noise(10, 16, octaves=3), 0, 1.2)
+    P.lift(np.clip(blob * 0.8, 0, 1).astype(np.float32), 1.0)
+    wc.wet(P, np.clip(blob, 0, 1).astype(np.float32), GLOW, strength=0.25, spread=4)
+    wc.wet(P, np.clip(wc.blur(blob, 10) * 1.2 - blob, 0, 1).astype(np.float32), AMBER, strength=0.25, spread=6)
+    LIGHTS.append((cx_, cy_ - 8, HZ + 8, 16, GLOW, 0.5, 1.6))
+    # 雾里远处几点小灯（窗、车站），没有杆：不齐、不等大
+    for x, y, r in ((512, 566, 2.6), (596, 556, 1.7), (842, 530, 2.4), (626, 571, 3.2)):
         core = np.clip(1 - S(r * 0.5, r * 1.3, np.hypot(xf - x, yf - y)), 0, 1).astype(np.float32)
         P.lift(core * 0.9, 1.0); P.add(core * 0.5, GLOW, 0.3)
         halo = np.exp(-(np.hypot(xf - x, yf - y) / (5 * r + 6)) ** 2) * (0.6 + 0.8 * wc.noise(6, octaves=2))
@@ -609,7 +624,7 @@ isolated(_lamps)
 
 # ================= 车：一辆往里开（两点红尾灯），一辆远远迎面来（两点白灯）=================
 CARS = []
-def car(cx, base, away=True):
+def car(cx, base, away=True, lose=0.0):
     s = scale_at(base)
     w, h = 1.12 * s, 0.86 * s
     x0 = cx - w / 2
@@ -617,7 +632,8 @@ def car(cx, base, away=True):
             (x0 + w * 0.86, base - h * 0.62), (x0 + w, base - h * 0.52), (x0 + w, base)]
     wetb = S(base - h * 0.4, base + 2, yf).astype(np.float32)
     cm = wc.wash(P, body, (30, 30, 50), strength=1.0, var=0.018, layers=10, edge=0.4, wet_map=wetb * 0.9, wet_r=4,
-                 fade=(1 - 0.6 * S(base - h * 0.25, base + 4, yf)).astype(np.float32))
+                 fade=((1 - 0.6 * S(base - h * 0.25, base + 4, yf)) *
+                       (1 - lose * S(x0 + w * 0.5, x0 + w * 0.95, xf) * S(base - h * 0.8, base - h * 0.3, yf))).astype(np.float32))   # 半边车化进湿地的暗
     wc.wet(P, cm * S(0.5, 0.7, wc.noise(8, octaves=2)), DEEP_WARM, strength=0.35, spread=3)
     # 后窗反着街尽头的光：浅一块，不贴边
     win = [(x0 + w * 0.25, base - h * 0.95), (x0 + w * 0.75, base - h * 0.95), (x0 + w * 0.84, base - h * 0.64), (x0 + w * 0.16, base - h * 0.64)]
@@ -646,14 +662,14 @@ def car(cx, base, away=True):
 
 def _cars():
     random.seed(SEED + 6)
-    car(648, 694, away=True)
-    car(492, 614, away=False)
-    car(596, 603, away=True)
+    car(648, 694, away=True, lose=0.85)
+    car(492, 614, away=False, lose=0.7)
+    car(596, 603, away=True, lose=0.9)
 isolated(_cars)
 
 # ================= 人：打伞的剪影，站在亮倒影前面 =================
 PEOPLE = []
-def umbrella_person(x, base, ucol=(30, 30, 50), coat=(38, 36, 56), lean=0.0, walking=True):
+def umbrella_person(x, base, ucol=(30, 30, 50), coat=(38, 36, 56), lean=0.0, walking=True, legs_keep=1.0):
     s = scale_at(base)
     h = 1.02 * s
     torso = [(x - h * 0.05, base - h * 0.85), (x + h * 0.05, base - h * 0.85), (x + h * 0.095, base - h * 0.8), (x + h * 0.08, base - h * 0.58),
@@ -664,7 +680,7 @@ def umbrella_person(x, base, ucol=(30, 30, 50), coat=(38, 36, 56), lean=0.0, wal
     spread = 0.07 if walking else 0.03
     for dx in (-spread, spread * 0.9):
         legs = np.maximum(legs, wc.stroke_mask([(x + dx * 0.5 * h, base - h * 0.34), (x + dx * h * 1.2, base)], h * 0.075, h * 0.03, taper=False, rough=0.2))
-    legs = legs * S(0.25, 0.5, 0.5 * P.vstreak + 0.5 * P.grain) * (1 - 0.5 * S(base - h * 0.1, base + 2, yf))
+    legs = legs * S(0.25, 0.5, 0.5 * P.vstreak + 0.5 * P.grain) * (1 - 0.5 * S(base - h * 0.1, base + 2, yf)) * (1 - (1 - legs_keep) * S(base - h * 0.3, base - h * 0.05, yf))
     P.add(legs, coat, 1.0)
     ux, uy, ur = x + lean * h * 0.08, base - h * 0.94, h * 0.27
     dome = [(ux + ur * math.cos(a), uy - ur * 0.55 * math.sin(a) + lean * ur * 0.25 * math.cos(a)) for a in np.linspace(0, math.pi, 20)]
@@ -679,10 +695,10 @@ def umbrella_person(x, base, ucol=(30, 30, 50), coat=(38, 36, 56), lean=0.0, wal
 
 def _people():
     random.seed(SEED + 7)
-    umbrella_person(222, 676, lean=0.2)
+    umbrella_person(222, 676, lean=0.2, legs_keep=0.2)
     umbrella_person(252, 672, ucol=(36, 40, 70), walking=False)
     umbrella_person(372, 632, lean=-0.1)
-    umbrella_person(430, 752, ucol=(176, 38, 42), coat=(40, 34, 52), lean=0.3)       # 红伞：横穿马路，站在灯的倒影前面
+    umbrella_person(430, 752, ucol=(176, 38, 42), coat=(40, 34, 52), lean=0.3, legs_keep=0.35)       # 红伞：横穿马路，站在灯的倒影前面
     umbrella_person(724, 640, ucol=(34, 34, 56))
 isolated(_people)
 OBJ = np.zeros((H, W), np.float32)             # 站在地上的东西挡住后面的倒影
@@ -707,7 +723,7 @@ for i, (lx, ly_, base, r, col, bright, lenk) in enumerate(LIGHTS):
     wob = np.roll(wob_all, i * 37, axis=0)[:, :1] * (0.6 * r + 0.04 * np.clip(yf - base, 0, None))
     xs = xf - lx - DX * (0.6 + 1.2 * np.clip(t, 0, 1)) - wob
     w = r * 1.05 + 0.02 * np.clip(yf - base, 0, None)
-    core = np.exp(-(xs / w) ** 2) * prof * (0.2 + 0.8 * S(0.44, 0.56, np.roll(dash, i * 53, axis=1)))
+    core = np.exp(-(xs / w) ** 2) * prof * (1 - CALM * 0.8 * (1 - S(0.44, 0.56, np.roll(dash, i * 53, axis=1))))
     fr = np.exp(-(xs / (w * 2.8)) ** 2) * prof
     core_tot = np.maximum(core_tot, (core * bright).astype(np.float32))
     key = tuple(col)
@@ -715,7 +731,7 @@ for i, (lx, ly_, base, r, col, bright, lenk) in enumerate(LIGHTS):
     if col != RED and col != PALE and hgt > 30:
         pr = np.exp(-(((xf - lx - DX * 1.2 - wob) / (0.03 * s + 0.8)) ** 2)) * S(base, base + 4, yf) * (1 - S(base, base + hgt * 0.9, yf))
         post_ref = np.maximum(post_ref, pr.astype(np.float32))
-wet_fac = (0.45 + 0.55 * puddle) * (1 - 0.55 * cuts) * ground * OCC
+wet_fac = (0.45 + 0.55 * puddle) * (1 - 0.55 * cuts * CALM) * ground * OCC
 P.add((post_ref * wet_fac * S(0.3, 0.6, P.vstreak)).astype(np.float32), (26, 26, 46), 0.6)
 for key, fm in fr_maps.items():
     fm = (fm * wet_fac).astype(np.float32)
@@ -776,6 +792,20 @@ for _ in range(260):
 rain = wc.blur(np.asarray(im, np.float32) / 255.0, 0.5)
 lit = np.clip(sum(np.exp(-(np.hypot(xf - lx, yf - ly_) / (6 * r + 20)) ** 2) * bright for lx, ly_, base, r, col, bright, lenk in LIGHTS if col != RED), 0, 1)
 P.lift((rain * S(0.3, 0.55, P.grain) * (0.12 + 0.55 * lit)).astype(np.float32), 1.0)
+
+def brush(pts, w, color=(30, 22, 36), strength=1.4, entry=0.08, dry_from=0.65, n=80):
+    return wc.brush(P, pts, w, color, strength, entry, dry_from, n)
+
+
+def _calligraphy():
+    """全画柔化完，在焦点（红伞那个人、那辆车）附近落几笔真正硬、快、带方向的深色（哥）。"""
+    brush([(391, 590), (412, 594), (440, 592), (468, 586)], 3.2, (60, 16, 24), 1.3)          # 红伞底下一道暗
+    brush([(414, 612), (410, 648), (407, 690), (409, 712)], 5.5, strength=1.5)                   # 大衣背后一刀，往下收
+    brush([(446, 614), (450, 660), (452, 700)], 3.0, strength=1.3, dry_from=0.5)                # 另一边轻一笔
+    brush([(588, 636), (630, 633), (676, 634)], 3.4, strength=1.3)                                # 车后窗下沿
+    brush([(585, 646), (584, 668), (586, 692)], 5.5, strength=1.5, dry_from=0.55)               # 车左边一刀硬边：左边找得到，右边化掉
+isolated(_calligraphy)
+
 
 def _splatter():
     """甩点：白的是雨点（留白/擦出来的），深的是笔上甩下来的颜料；灯和窗附近多一点。"""
