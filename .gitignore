@@ -7,5 +7,7 @@ example_values.png
 example_values_thumb.png
 example_narrow.png
 example_narrow_thumb.png
+scenes/*_[0-9]*.png
+scenes/*_values.png
+scenes/*_values_thumb.png
 .DS_Store
-

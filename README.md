@@ -50,11 +50,28 @@ python3 -m venv .venv
 
 默认画布是 900×1150。完整范例通常十几秒生成，速度取决于机器。
 
+## 更多场景
+
+`scenes/` 收录三份可运行的进阶范例：
+
+- `venice.py`：威尼斯运河、倒影位移场、光道、尾浪、建筑体积和景深。
+- `harbor.py`：1200×850 的清晨渔港、逆光船剪影与碎金光路。
+- `rainnight.py`：雨夜深色叠法、积水、灯下光斑和雨丝。
+
+```bash
+.venv/bin/python scenes/venice.py
+.venv/bin/python scenes/harbor.py
+.venv/bin/python scenes/rainnight.py
+```
+
+![威尼斯运河范例](scenes/venice.png)
+
 ## 文件
 
 - `SKILL.md`：完整构图方法、光影判断、翻车记录和修改原则。
 - `watercolor_lib.py`：纸张、颜料、湿画、干笔、留白、噪声和纹理引擎。
 - `example.py`：一张完整城市街景从大块到细节的可运行范例。
+- `scenes/`：运河、渔港和雨夜三个进阶构图范例及对应成图。
 - `pigment_profile.npy`：一维径向功率谱，用随机相位合成颜料颗粒；不包含参考画面。
 - `wrong_0928_narrow_mask.png`：旧窄街投影的反例，供对照判断。
 
