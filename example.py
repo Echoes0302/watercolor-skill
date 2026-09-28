@@ -51,6 +51,13 @@ def ly(x, near_y, side):
     f = (VP[0] - x) / VP[0] if side == "L" else (x - VP[0]) / (W - VP[0])
     return VP[1] + (near_y - VP[1]) * f
 
+def rec(x, y, x2):
+    """墙上过 (x, y) 的那条水平线（它也朝消失点收）走到 x2 时的 y。
+    窗的上沿、下沿、窗台、过梁影都顺着它：视线以上往消失点方向往下收，视线以下往上收，跟屋檐同向。
+    9/29 她抓的：以前每格窗的斜度写死一个数（右墙一律往右下、左墙一律往右上），
+    一排窗顺着透视往里排、每格窗自己却往外翘——视线以上的窗两边全反了。"""
+    return VP[1] + (y - VP[1]) * (x2 - VP[0]) / (x - VP[0])
+
 def skyline(segs, side):
     pts = []
     for xa, xb, T, orn in segs:
@@ -210,7 +217,7 @@ for xa, xb, T, _ in R_segs:
             ww, wh = (12 * f + 2) * random.uniform(0.7, 1.2), (40 * f + 4) * random.uniform(0.6, 1.1)
             wy += random.uniform(-4, 4) * f
             r = random.random()
-            q = [(x, wy), (x + ww, wy + ww * 0.15), (x + ww, wy + wh), (x, wy + wh)]
+            q = [(x, wy), (x + ww, rec(x, wy, x + ww)), (x + ww, rec(x, wy + wh, x + ww)), (x, wy + wh)]
             pres = PRES_R[int(min(H - 1, max(0, wy))), int(min(W - 1, max(0, x)))]
             if r < 0.5 and pres < 0.4:
                 pass
@@ -218,9 +225,10 @@ for xa, xb, T, _ in R_segs:
                 wc.wash(P, q, (22, 26, 32), strength=random.uniform(0.3, 0.55), var=0.03, layers=3, edge=0.45)
                 def _hole(x=x, wy=wy, ww=ww, wh=wh, f=f):
                     # 背光面的窗也是洞：洞口上沿深一截，窗台被街上反上来的光擦亮一点
-                    top_ = [(x, wy), (x + ww, wy + ww * 0.15), (x + ww, wy + wh * 0.35), (x, wy + wh * 0.35)]
+                    top_ = [(x, wy), (x + ww, rec(x, wy, x + ww)), (x + ww, rec(x, wy + wh * 0.35, x + ww)), (x, wy + wh * 0.35)]
                     wc.wash(P, top_, (14, 16, 22), strength=0.35, var=0.02, layers=3, edge=0.4)
-                    sill = wc.stroke_mask([(x - ww * 0.15, wy + wh + 1.5), (x + ww * 1.15, wy + wh + 1.5 + ww * 0.15)], 1.2 * f + 0.8, 1.2 * f + 0.8, taper=False, rough=0.2)
+                    ys = wy + wh + 1.5
+                    sill = wc.stroke_mask([(x - ww * 0.15, rec(x, ys, x - ww * 0.15)), (x + ww * 1.15, rec(x, ys, x + ww * 1.15))], 1.2 * f + 0.8, 1.2 * f + 0.8, taper=False, rough=0.2)
                     P.lift((sill * S(0.3, 0.55, P.grain) * 0.35).astype(np.float32), 1.0)
                 isolated(_hole)
             elif r < 0.5:
@@ -256,18 +264,19 @@ for xa, xb, T, _ in L_segs:
             ww, wh = (9 * f + 2) * random.uniform(0.8, 1.2), (30 * f + 4) * random.uniform(0.7, 1.1)
             wy += random.uniform(-3, 3) * f
             if random.random() < 0.42 and PRES_L[int(min(H - 1, max(0, wy))), int(max(0, min(W - 1, x)))] > 0.45:
-                q = [(x, wy), (x + ww, wy - ww * 0.2), (x + ww, wy + wh), (x, wy + wh)]
+                q = [(x, wy), (x + ww, rec(x, wy, x + ww)), (x + ww, rec(x, wy + wh, x + ww)), (x, wy + wh)]
                 dfar = float(dist[int(min(H - 1, wy)), int(max(0, min(W - 1, x)))])
                 wc.wash(P, q, (86, 70, 66), strength=random.uniform(0.4, 0.75) * (1 - 0.7 * dfar),
                         var=0.02, layers=3, edge=0.5)
                 if f > 0.3:
                     def _hole(x=x, wy=wy, ww=ww, wh=wh, f=f, dfar=dfar):
                         # 窗是个洞：过梁的影（上沿）和里侧更深；窗台亮一横但被纸纹咬碎；窗台下一线影、往下淌一道
-                        top_ = [(x, wy), (x + ww, wy - ww * 0.2), (x + ww, wy + wh * 0.3 - ww * 0.2), (x, wy + wh * 0.3)]
+                        top_ = [(x, wy), (x + ww, rec(x, wy, x + ww)), (x + ww, rec(x, wy + wh * 0.3, x + ww)), (x, wy + wh * 0.3)]
                         wc.wash(P, top_, (54, 40, 38), strength=0.45 * (1 - 0.7 * dfar), var=0.02, layers=3, edge=0.4)
-                        side = [(x, wy), (x + ww * 0.3, wy - ww * 0.06), (x + ww * 0.3, wy + wh), (x, wy + wh)]
+                        side = [(x, wy), (x + ww * 0.3, rec(x, wy, x + ww * 0.3)), (x + ww * 0.3, rec(x, wy + wh, x + ww * 0.3)), (x, wy + wh)]
                         wc.wash(P, side, (54, 40, 38), strength=0.3 * (1 - 0.7 * dfar), var=0.02, layers=3, edge=0.4)
-                        sill = wc.stroke_mask([(x - ww * 0.2, wy + wh + 1.2), (x + ww * 1.2, wy + wh + 1.2 - ww * 0.22)], 1.2 * f + 0.8, 1.2 * f + 0.8, taper=False, rough=0.2)
+                        ys = wy + wh + 1.2
+                        sill = wc.stroke_mask([(x - ww * 0.2, rec(x, ys, x - ww * 0.2)), (x + ww * 1.2, rec(x, ys, x + ww * 1.2))], 1.2 * f + 0.8, 1.2 * f + 0.8, taper=False, rough=0.2)
                         P.lift((sill * S(0.3, 0.55, P.grain) * 0.4).astype(np.float32), 1.0)
                         P.add(np.roll(sill, int(1.2 * f + 1.5), axis=0).astype(np.float32), (120, 92, 78), 0.3)
                         L_ = random.uniform(6, 30) * f + 3

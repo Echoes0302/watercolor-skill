@@ -53,6 +53,12 @@ def ly(x, near_y, side):
     f = (VP[0] - x) / VP[0] if side == "L" else (x - VP[0]) / (W - VP[0])
     return VP[1] + (near_y - VP[1]) * f
 
+def rec(x, y, x2):
+    """墙上过 (x, y) 的水平线（朝消失点收）走到 x2 时的 y。窗的上下沿、拱顶、窗台、百叶都顺着它。
+    9/29 她抓的：以前每格窗的斜度写死（右岸一律往右下、左岸一律往右上），视线以上的窗全往外翘。"""
+    return VP[1] + (y - VP[1]) * (x2 - VP[0]) / (x - VP[0])
+
+
 
 def skyline(segs, side):
     pts = []
@@ -213,18 +219,20 @@ for xa, xb, T, orn, col in R_segs:
             f = (x - VP[0]) / (W - VP[0])
             wy = ly(x, yn, "R")
             ww, wh = (13 * f + 2) * random.uniform(0.8, 1.15), (46 * f + 5) * random.uniform(0.8, 1.05)
-            skew = ww * 0.12
-            q = [(x, wy + wh * 0.18), (x + ww * 0.5, wy - wh * 0.02), (x + ww, wy + wh * 0.18 + skew), (x + ww, wy + wh + skew), (x, wy + wh)]
+            q = [(x, wy + wh * 0.18), (x + ww * 0.5, rec(x, wy - wh * 0.02, x + ww * 0.5)), (x + ww, rec(x, wy + wh * 0.18, x + ww)),
+                 (x + ww, rec(x, wy + wh, x + ww)), (x, wy + wh)]
             r = random.random()
             if r < 0.5:
                 wc.wash(P, q, (40, 38, 42), strength=random.uniform(0.25, 0.65), var=0.03, layers=3, edge=0.4, fade=NOB)
-                def _depth(x=x, wy=wy, ww=ww, wh=wh, skew=skew, f=f, col=col):
+                def _depth(x=x, wy=wy, ww=ww, wh=wh, f=f, col=col):
                     # 窗是个洞：洞口上沿（过梁的影）和靠里那一侧更深；窗台是亮的一横，底下一线影；窗台下往下淌一道
-                    top_ = [(x, wy + wh * 0.18), (x + ww * 0.5, wy - wh * 0.02), (x + ww, wy + wh * 0.18 + skew), (x + ww, wy + wh * 0.42 + skew), (x, wy + wh * 0.4)]
+                    top_ = [(x, wy + wh * 0.18), (x + ww * 0.5, rec(x, wy - wh * 0.02, x + ww * 0.5)), (x + ww, rec(x, wy + wh * 0.18, x + ww)),
+                            (x + ww, rec(x, wy + wh * 0.42, x + ww)), (x, wy + wh * 0.4)]
                     wc.wash(P, top_, (26, 24, 28), strength=0.45, var=0.02, layers=3, edge=0.4, fade=NOB)
-                    side = [(x, wy + wh * 0.2), (x + ww * 0.28, wy + wh * 0.1), (x + ww * 0.28, wy + wh + skew * 0.3), (x, wy + wh)]
+                    side = [(x, wy + wh * 0.2), (x + ww * 0.28, rec(x, wy + wh * 0.1, x + ww * 0.28)), (x + ww * 0.28, rec(x, wy + wh, x + ww * 0.28)), (x, wy + wh)]
                     wc.wash(P, side, (26, 24, 28), strength=0.35, var=0.02, layers=3, edge=0.4, fade=NOB)
-                    sill = wc.stroke_mask([(x - ww * 0.18, wy + wh + 1.5), (x + ww * 1.18, wy + wh + 1.5 + skew)], 1.3 * f + 0.9, 1.3 * f + 0.9, taper=False, rough=0.2)
+                    ys = wy + wh + 1.5
+                    sill = wc.stroke_mask([(x - ww * 0.18, rec(x, ys, x - ww * 0.18)), (x + ww * 1.18, rec(x, ys, x + ww * 1.18))], 1.3 * f + 0.9, 1.3 * f + 0.9, taper=False, rough=0.2)
                     P.lift((sill * NOB * S(0.3, 0.55, P.grain) * 0.45).astype(np.float32), 1.0)       # 窗台亮，但被纸纹咬碎，不是一条下划线
                     P.add((np.roll(sill, int(1.4 * f + 1.5), axis=0) * NOB).astype(np.float32), (110, 80, 68), 0.35)
                     u = random.uniform(0.2, 0.8)
@@ -233,7 +241,7 @@ for xa, xb, T, orn, col in R_segs:
                     P.add((drip * S(0.3, 0.6, P.vstreak) * NOB).astype(np.float32), tuple(int(c * 0.72) for c in col), 0.35)
                 isolated(_depth)
                 if random.random() < 0.2 and f > 0.25:        # 旁边一扇灰绿的百叶
-                    q2 = [(a + ww * 1.05, b + skew * 0.3) for a, b in q]
+                    q2 = [(a + ww * 1.05, rec(a, b, a + ww * 1.05)) for a, b in q]
                     wc.wash(P, q2, (96, 114, 96), strength=0.4, var=0.03, layers=3, edge=0.4, fade=NOB)
             elif r < 0.62:
                 P.lift(wc.poly_mask(q) * 0.3, 1.0)
@@ -383,13 +391,16 @@ for xa, xb, T, _ in L_segs:
                 break
             ww, wh = (11 * f + 2) * random.uniform(0.8, 1.1), (40 * f + 5) * random.uniform(0.8, 1.05)
             if random.random() < 0.45:
-                q = [(x, wy + wh * 0.18), (x + ww * 0.5, wy), (x + ww, wy + wh * 0.18 - ww * 0.15), (x + ww, wy + wh - ww * 0.15), (x, wy + wh)]
+                q = [(x, wy + wh * 0.18), (x + ww * 0.5, rec(x, wy, x + ww * 0.5)), (x + ww, rec(x, wy + wh * 0.18, x + ww)),
+                     (x + ww, rec(x, wy + wh, x + ww)), (x, wy + wh)]
                 wc.wash(P, q, (22, 26, 32), strength=random.uniform(0.35, 0.6), var=0.02, layers=3, edge=0.45)
                 def _sill(x=x, wy=wy, ww=ww, wh=wh, f=f):
                     # 背光面的窗也是洞：窗台被对岸和水面反上来的光擦亮一点，洞口上沿再深一点
-                    sill = wc.stroke_mask([(x - ww * 0.15, wy + wh + 1.5), (x + ww * 1.15, wy + wh + 1.5 - ww * 0.15)], 1.2 * f + 0.8, 1.2 * f + 0.8, taper=False, rough=0.2)
+                    ys = wy + wh + 1.5
+                    sill = wc.stroke_mask([(x - ww * 0.15, rec(x, ys, x - ww * 0.15)), (x + ww * 1.15, rec(x, ys, x + ww * 1.15))], 1.2 * f + 0.8, 1.2 * f + 0.8, taper=False, rough=0.2)
                     P.lift((sill * S(0.3, 0.55, P.grain) * 0.35).astype(np.float32), 1.0)
-                    top_ = [(x, wy + wh * 0.18), (x + ww * 0.5, wy), (x + ww, wy + wh * 0.18 - ww * 0.15), (x + ww, wy + wh * 0.4 - ww * 0.15), (x, wy + wh * 0.4)]
+                    top_ = [(x, wy + wh * 0.18), (x + ww * 0.5, rec(x, wy, x + ww * 0.5)), (x + ww, rec(x, wy + wh * 0.18, x + ww)),
+                            (x + ww, rec(x, wy + wh * 0.4, x + ww)), (x, wy + wh * 0.4)]
                     wc.wash(P, top_, (14, 16, 22), strength=0.35, var=0.02, layers=3, edge=0.4)
                 isolated(_sill)
             x += ww * random.uniform(2.0, 3.0)
