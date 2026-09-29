@@ -13,3 +13,4 @@ scenes/*_values_thumb.png
 scenes/rainnight_old_cutout.png
 scenes/rainnight_old_cutout_[0-9]*.png
 .DS_Store
+animals/*.png

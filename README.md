@@ -15,6 +15,12 @@
 
 ![窄街光影](final_0928_narrow.png)
 
+## 往画里放动物
+
+`animals/street_animals.py`：狗、猫、鸽子不当主角，是一团洇开的毛茸茸墨点 + 一两个一眼认得出的特征，跟画里的人一个级别；影子和人一样从同一个太阳脚下放射，摆放成团但不排队。
+
+![电车街里的狗、猫和鸽子](final_0929_animals_detail.png)
+
 ## 安装为 skill
 
 Claude Code：
@@ -75,6 +81,7 @@ python3 -m venv .venv
 - `example.py`：一张完整城市街景从大块到细节的可运行范例。
 - `example_state_pass3_3.pkl`：seed 3 第三遍开头的随机状态，使主街范例能逐像素复现定稿。
 - `scenes/`：运河、渔港和雨夜三个进阶构图范例及对应成图。
+- `animals/`：往风景里放动物（`street_animals.py`）；`animal_lib.py` 里是洇出毛边的 `bleed()`。
 - `wrong_0928_rainnight_cutout.png`：旧雨夜剪纸感的反例；对应代码保留在 `scenes/rainnight_old_cutout.py`。
 - `wrong_0928_venice_water.png`：旧威尼斯水面的反例，展示满河重复噪声与横向错位留下的代码痕迹。
 - `pigment_profile.npy`：一维径向功率谱，用随机相位合成颜料颗粒；不包含参考画面。
