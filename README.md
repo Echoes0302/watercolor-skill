@@ -21,6 +21,18 @@
 
 ![电车街里的狗、猫和鸽子](final_0929_animals_detail.png)
 
+## 画室内
+
+`interior/corner.py`：川西老茶馆一角，下午。有人刚起身走了，竹椅拉开没推回去，盖碗还冒着气，窗里的光落在地上。
+
+街景的规矩搬进屋会画成平面儿童画。室内这一章（`SKILL.md`「室内」）记的是：景要小、先定光、镜头偏一点露出墙角、每个面一个明暗且折角是硬的、块的两个面明暗不同、开窗那面墙最暗而屋里的亮是地上光斑往上反的（`interior/bounce.py` 按光斑位置和每个面的朝向算）、家具是几笔不是盒子、先留白再一大遍暗围进去、细节要堆但要像真的、藏色只转色相不动亮度。`interior/wrong_1001_*.png` 是一路翻过的车。
+
+```bash
+.venv/bin/python interior/corner.py   # 约 25 秒，出 interior/corner.png
+```
+
+![茶馆一角](interior/final_1001_teahouse.png)
+
 ## 安装为 skill
 
 Claude Code：
@@ -81,6 +93,7 @@ python3 -m venv .venv
 - `example.py`：一张完整城市街景从大块到细节的可运行范例。
 - `example_state_pass3_3.pkl`：seed 3 第三遍开头的随机状态，使主街范例能逐像素复现定稿。
 - `scenes/`：运河、渔港和雨夜三个进阶构图范例及对应成图。
+- `interior/`：室内范例。`scene.py` 一个相机和一间屋子（所有东西从同一个 3D 投下来）、`bounce.py` 地上光斑往上反的光、`corner.py` 茶馆一角定稿、`exp_wetgrow.py` 湿笔和虚实的实验版（没进定稿）；`wrong_1001_*.png` 是反例。
 - `animals/`：往风景里放动物（`street_animals.py`）；`animal_lib.py` 里是洇出毛边的 `bleed()`。
 - `wrong_0928_rainnight_cutout.png`：旧雨夜剪纸感的反例；对应代码保留在 `scenes/rainnight_old_cutout.py`。
 - `wrong_0928_venice_water.png`：旧威尼斯水面的反例，展示满河重复噪声与横向错位留下的代码痕迹。
